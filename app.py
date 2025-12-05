@@ -153,6 +153,10 @@ if "auto_tasks_attempted" not in st.session_state:
     st.session_state.auto_tasks_attempted = False
 if "filter_mode" not in st.session_state:
     st.session_state.filter_mode = "Solo hoy"
+if "filter_date" not in st.session_state:
+    st.session_state.filter_date = None
+if "filter_tags" not in st.session_state:
+    st.session_state.filter_tags = []
 DEFAULT_TIMEZONE = ZoneInfo("Europe/Madrid")
 
 # Auto-connect if a cached token exists, but avoid triggering a fresh OAuth flow implicitly.
@@ -345,6 +349,61 @@ else:
         filtered_tasks = [task for task in filtered_tasks if is_in_inbox(task)]
     elif st.session_state.filter_mode == "Solo hoy":
         filtered_tasks = [task for task in filtered_tasks if is_due_today(task)]
+
+    # Extract all tags from tasks for the filter
+    all_tags = set()
+    for t in filtered_tasks:
+        all_tags |= extract_tags(t)
+    tag_options = sorted(all_tags)
+
+    # Create filter row with Date, Tags, and Clear buttons
+    st.markdown("---")
+    filter_cols = st.columns([2, 2, 1])
+    
+    with filter_cols[0]:
+        st.markdown("**Filtrar por fecha:**")
+        filter_date = st.date_input(
+            "Selecciona una fecha",
+            value=st.session_state.filter_date or date.today(),
+            key="filter_date_picker",
+            label_visibility="collapsed"
+        )
+        if filter_date != st.session_state.filter_date:
+            st.session_state.filter_date = filter_date if filter_date != date.today() or st.session_state.filter_date is not None else None
+
+    with filter_cols[1]:
+        st.markdown("**Filtrar por tags:**")
+        if tag_options:
+            selected_tags = st.multiselect(
+                "Selecciona tags",
+                options=tag_options,
+                default=st.session_state.filter_tags,
+                key="filter_tags_select",
+                label_visibility="collapsed"
+            )
+            st.session_state.filter_tags = selected_tags
+        else:
+            st.caption("Sin tags disponibles")
+
+    with filter_cols[2]:
+        st.markdown("**Acciones:**")
+        if st.button("Limpiar filtros", use_container_width=True):
+            st.session_state.filter_date = None
+            st.session_state.filter_tags = []
+            st.rerun()
+
+    # Apply filters
+    if st.session_state.filter_date:
+        filtered_tasks = [
+            task for task in filtered_tasks 
+            if task.get('due') and datetime.fromisoformat(task['due']).date() == st.session_state.filter_date
+        ]
+
+    if st.session_state.filter_tags:
+        filtered_tasks = [
+            task for task in filtered_tasks
+            if extract_tags(task).intersection(st.session_state.filter_tags)
+        ]
 
     st.subheader("Suggested tasks")
     if time_available is None:
