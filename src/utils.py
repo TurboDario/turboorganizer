@@ -6,27 +6,32 @@ from datetime import datetime, timedelta, timezone
 from typing import Iterable, List, MutableMapping
 
 DEFAULT_DURATION_MINUTES = 15
-DURATION_PATTERN = re.compile(r"\[(\d+)\s*m\]", re.IGNORECASE)
+DURATION_PATTERN = re.compile(
+    r"(?<!\d)(?:(?P<hours>\d+)\s*h)?\s*(?:(?P<minutes>\d+)\s*m)?(?![a-zA-Z0-9])",
+    re.IGNORECASE,
+)
 
 
-def parse_task_duration(title: str, default: int = DEFAULT_DURATION_MINUTES) -> int:
-    """Extract a duration in minutes from a task title.
+def parse_task_duration(title: str, notes: str | None = None, default: int = DEFAULT_DURATION_MINUTES) -> int:
+    """Extract a duration in minutes from task title or notes.
 
-    The parser looks for markers such as ``[45m]`` inside the title. If no
-    marker is found, ``default`` minutes are returned.
+    Supports patterns like ``80m`` or ``1h20m`` appearing anywhere in the text.
+    If nothing is found, ``default`` minutes are returned.
     """
 
-    if not title:
-        return default
-
-    match = DURATION_PATTERN.search(title)
-    if not match:
-        return default
-
-    try:
-        return int(match.group(1))
-    except (TypeError, ValueError):
-        return default
+    text = f"{title or ''} {notes or ''}".lower()
+    for match in DURATION_PATTERN.finditer(text):
+        hours_part = match.group("hours")
+        minutes_part = match.group("minutes")
+        if not hours_part and not minutes_part:
+            continue
+        try:
+            total_minutes = int(hours_part or 0) * 60 + int(minutes_part or 0)
+        except (TypeError, ValueError):
+            continue
+        if total_minutes > 0:
+            return total_minutes
+    return default
 
 
 def round_up_to_five_minutes(moment: datetime | None = None) -> datetime:
