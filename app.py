@@ -2,6 +2,7 @@
 from datetime import date, datetime
 from zoneinfo import ZoneInfo
 import unicodedata
+from urllib.parse import quote
 
 import streamlit as st
 
@@ -36,7 +37,44 @@ st.markdown(
     div[data-testid="stRadio"] input {
         display: none;
     }
+    div[data-testid="stRadio"] svg {
+        display: none;
+    }
     div[data-testid="stRadio"] label:has(input:checked) {
+        background: #ff5f57;
+        border-color: #ff5f57;
+        color: #ffffff;
+        box-shadow: 0 4px 12px rgba(255,95,87,0.35);
+    }
+    .task-link {
+        color: inherit !important;
+        text-decoration: none !important;
+    }
+    .task-link:hover {
+        text-decoration: underline !important;
+    }
+    /* Hide default Streamlit menu */
+    #MainMenu { visibility: hidden; }
+    /* Pill style for filter buttons */
+    div[data-testid="baseButton-primary"] > button,
+    div[data-testid="baseButton-secondary"] > button {
+        border: 1px solid #333;
+        background: #111;
+        color: #fafafa;
+        padding: 10px 16px;
+        border-radius: 10px;
+        font-weight: 500;
+        transition: all 0.15s ease;
+    }
+    /* Full-width, consistent spacing in the sidebar */
+    div[data-testid="stSidebar"] div[data-testid^="baseButton"] > button {
+        width: 100%;
+        margin-bottom: 8px;
+    }
+    div[data-testid="baseButton-secondary"] > button:hover {
+        border-color: #555;
+    }
+    div[data-testid="baseButton-primary"] > button {
         background: #ff5f57;
         border-color: #ff5f57;
         color: #ffffff;
@@ -89,6 +127,8 @@ def remove_task_from_state(task_id: str) -> None:
 
 
 def format_duration(minutes: int | None) -> str:
+    if minutes is None:
+        return "Indefinido"
     mins = max(int(minutes or 0), 0)
     hours, rem = divmod(mins, 60)
     parts = []
@@ -97,34 +137,6 @@ def format_duration(minutes: int | None) -> str:
     if rem or not parts:
         parts.append(f"{rem}min")
     return " ".join(parts)
-
-
-with st.sidebar:
-    if st.button("Connect Google", type="primary"):
-        try:
-            st.session_state.credentials = load_credentials()
-            st.success("Authenticated with Google!")
-        except Exception as exc:  # noqa: BLE001
-            st.error(f"Authentication failed: {exc}")
-
-    if st.session_state.credentials and st.button("Refresh token"):
-        try:
-            st.session_state.credentials = load_credentials(force_reauth=True)
-            st.success("Token refreshed")
-        except Exception as exc:  # noqa: BLE001
-            st.error(f"Failed to refresh: {exc}")
-
-    if st.session_state.credentials and st.button("Disconnect"):
-        clear_credentials()
-        st.session_state.credentials = None
-        st.session_state.tasks = []
-        st.session_state.tasks_loaded = False
-        st.info("Signed out and cache cleared.")
-
-
-st.sidebar.header("Decision Engine")
-time_available = st.sidebar.slider("How much time do you have?", 15, 240, 60, step=15)
-energy_level = st.sidebar.selectbox("Energy level", ["Low", "Medium", "High"], index=1)
 
 
 def load_tasks():
@@ -136,8 +148,85 @@ def load_tasks():
         st.error(f"Unable to load tasks: {exc}")
 
 
-if st.session_state.credentials and st.button("Load my Tasks", type="primary"):
-    load_tasks()
+with st.sidebar:
+    if st.button("Connect Google", type="primary", use_container_width=True):
+        try:
+            st.session_state.credentials = load_credentials()
+            st.success("Authenticated with Google!")
+        except Exception as exc:  # noqa: BLE001
+            st.error(f"Authentication failed: {exc}")
+
+    if st.session_state.credentials and st.button("Refresh token", use_container_width=True):
+        try:
+            st.session_state.credentials = load_credentials(force_reauth=True)
+            st.success("Token refreshed")
+        except Exception as exc:  # noqa: BLE001
+            st.error(f"Failed to refresh: {exc}")
+
+    if st.session_state.credentials and st.button("Load my Tasks", type="primary", use_container_width=True):
+        load_tasks()
+
+    if st.session_state.credentials and st.button("Disconnect", use_container_width=True):
+        clear_credentials()
+        st.session_state.credentials = None
+        st.session_state.tasks = []
+        st.session_state.tasks_loaded = False
+        st.info("Signed out and cache cleared.")
+
+st.sidebar.divider()
+st.sidebar.subheader("Menú")
+if st.sidebar.button("🔄 Reiniciar app", use_container_width=True):
+    st.rerun()
+if st.sidebar.button("🧹 Limpiar caché", use_container_width=True):
+    st.cache_data.clear()
+    st.cache_resource.clear()
+    st.success("Caché limpiada")
+with st.sidebar.expander("Acerca de"):
+    st.markdown(
+        """
+        **TurboOrganizer**  
+        - Integra Google Tasks y Google Calendar.  
+        - Filtra por tiempo, energía, fecha y tags.  
+        - Programa tareas directamente en tu calendario.
+        """
+    )
+st.sidebar.markdown(
+    "[Ayuda de Streamlit](https://docs.streamlit.io/) · "
+    "[Reportar problema](https://github.com/)  ",
+    unsafe_allow_html=True,
+)
+
+st.markdown("")
+with st.container(border=True):
+    st.subheader("Decision Engine")
+    engine_cols = st.columns([2, 1])
+    time_values = list(range(15, 241, 15)) + [1440, -1]  # -1 = indefinido
+
+    def time_label_from_value(val: int) -> str:
+        if val == -1:
+            return "Indefinido"
+        if val == 1440:
+            return "1 día"
+        return f"{val} min"
+
+    default_time_value = 60
+    saved_value = st.session_state.get("time_choice", default_time_value)
+    if saved_value not in time_values:
+        st.session_state.pop("time_choice", None)
+        saved_value = default_time_value
+
+    time_choice_value = engine_cols[0].select_slider(
+        "¿Cuánto tiempo tienes?",
+        options=time_values,
+        value=saved_value,
+        format_func=time_label_from_value,
+        key="time_choice",
+    )
+    time_available = None if time_choice_value == -1 else time_choice_value
+    energy_level = engine_cols[1].selectbox(
+        "Nivel de energía", ["Low", "Medium", "High"], index=1, key="energy_main"
+    )
+
 
 # If authenticated and tasks haven't been loaded yet, do it automatically once.
 if (
@@ -195,6 +284,16 @@ else:
         title_tags = pattern.findall(task.get('title', ''))
         note_tags = pattern.findall(task.get('notes', '') or '')
         return {tag.lower() for tag in title_tags + note_tags}
+
+    def task_link(task) -> str | None:
+        task_id = task.get("id")
+        tasklist = task.get("tasklist")
+        if not task_id or not tasklist:
+            return None
+        list_q = quote(str(tasklist))
+        task_q = quote(str(task_id))
+        # Use the hash fragment to jump directly to the task inside the list.
+        return f"https://tasks.google.com/embed/list?list={list_q}#task/{task_q}"
 
     all_tags = set()
     for t in st.session_state.tasks:
@@ -301,7 +400,13 @@ else:
         ]
 
         st.subheader("Suggested tasks")
-    st.caption(f"Showing tasks that fit within {time_available} minutes. {energy_badge(energy_level)}")
+    if time_available is None:
+        time_summary = "sin límite de tiempo"
+    elif time_available == 1440:
+        time_summary = "dentro de 1 día"
+    else:
+        time_summary = f"dentro de {time_available} minutos"
+    st.caption(f"Mostrando tareas que caben {time_summary}. {energy_badge(energy_level)}")
 
     if not filtered_tasks:
         st.success("No tasks fit the current window. Enjoy a break or widen the time range!")
@@ -318,11 +423,20 @@ else:
                 tags_list = sorted(extract_tags(task))
                 tags_display = ", ".join(f"#{t}" for t in tags_list) if tags_list else "None"
 
+                task_url = task_link(task)
+                if task_url:
+                    title_md = (
+                        f"<a class='task-link' href='{task_url}' target='_blank'>"
+                        f"<strong>{title_prefix}{task['title']} ↗</strong></a>"
+                    )
+                else:
+                    title_md = f"<strong>{title_prefix}{task['title']}</strong>"
                 cols[0].markdown(
-                    f"{title_prefix}**{task['title']}**\n\n"
-                    f"Project: `{task['project']}`\n\n"
-                    f"Duration: {format_duration(task.get('duration'))}\n\n"
-                    f"Tags: {tags_display}"
+                    f"{title_md}<br><br>"
+                    f"Project: `{task['project']}`<br><br>"
+                    f"Duration: {format_duration(task.get('duration'))}<br><br>"
+                    f"Tags: {tags_display}",
+                    unsafe_allow_html=True,
                 )
 
                 mark_done = cols[1].checkbox(

@@ -12,7 +12,9 @@ DURATION_PATTERN = re.compile(
 )
 
 
-def parse_task_duration(title: str, notes: str | None = None, default: int = DEFAULT_DURATION_MINUTES) -> int:
+def parse_task_duration(
+    title: str, notes: str | None = None, default: int | None = DEFAULT_DURATION_MINUTES
+) -> int | None:
     """Extract a duration in minutes from task title or notes.
 
     Supports patterns like ``80m`` or ``1h20m`` appearing anywhere in the text.
@@ -49,10 +51,26 @@ def round_up_to_five_minutes(moment: datetime | None = None) -> datetime:
     return rounded
 
 
-def filter_tasks_by_time(tasks: Iterable[MutableMapping], minutes_available: int) -> List[MutableMapping]:
-    """Return tasks whose duration fits within the available window."""
+def filter_tasks_by_time(tasks: Iterable[MutableMapping], minutes_available: int | None) -> List[MutableMapping]:
+    """Return tasks whose duration fits within the available window.
 
-    return [task for task in tasks if int(task.get("duration", DEFAULT_DURATION_MINUTES)) <= minutes_available]
+    Tasks with undefined duration (None) are only included when minutes_available is None (indefinido).
+    """
+
+    if minutes_available is None:
+        return list(tasks)
+    filtered = []
+    for task in tasks:
+        duration = task.get("duration")
+        if duration is None:
+            continue
+        try:
+            duration_int = int(duration)
+        except (TypeError, ValueError):
+            continue
+        if duration_int <= minutes_available:
+            filtered.append(task)
+    return filtered
 
 
 def energy_badge(level: str) -> str:

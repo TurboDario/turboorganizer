@@ -59,7 +59,7 @@ def fetch_tasks(creds) -> List[MutableMapping]:
                 continue
 
             title = task.get("title", "Untitled Task")
-            duration = parse_task_duration(title, task.get("notes"))
+            duration = parse_task_duration(title, task.get("notes"), default=None)
             is_overdue = bool(due_date and due_date.date() < now)
             collected.append(
                 {
@@ -97,7 +97,7 @@ def schedule_task(
     if start.tzinfo is None:
         start = start.replace(tzinfo=timezone.utc)
 
-    duration_minutes = int(task.get("duration", 15))
+    duration_minutes = int(task.get("duration") or 15)
     end_time = start + timedelta(minutes=duration_minutes)
     time_zone = getattr(start.tzinfo, "key", None) or "UTC"
 
