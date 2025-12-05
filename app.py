@@ -1,7 +1,9 @@
+from datetime import date, datetime, timezone
+
 import streamlit as st
 
 from src.auth import SCOPES, clear_credentials, load_credentials
-from src.services import fetch_tasks, schedule_task
+from src.services import fetch_tasks, schedule_task, snooze_task
 from src.utils import energy_badge, filter_tasks_by_time
 
 st.set_page_config(page_title="TurboOrganizer", page_icon="🚀", layout="wide")
@@ -17,6 +19,10 @@ if "tasks" not in st.session_state:
     st.session_state.tasks = []
 if "tasks_loaded" not in st.session_state:
     st.session_state.tasks_loaded = False
+
+
+def remove_task_from_state(task_id: str) -> None:
+    st.session_state.tasks = [task for task in st.session_state.tasks if task.get("id") != task_id]
 
 
 with st.sidebar:
@@ -77,22 +83,62 @@ else:
     else:
         for task in filtered_tasks:
             with st.container(border=True):
-                cols = st.columns([3, 2, 1])
+                cols = st.columns([3, 2, 1, 1])
                 cols[0].markdown(
                     f"**{task['title']}**\n\n"
                     f"Project: `{task['project']}`\n\n"
                     f"Duration: {task['duration']} min"
                 )
+
                 mark_done = cols[1].checkbox(
-                    "Mark completed after scheduling", key=f"done_{task['id']}"
+                    "Mark completed after scheduling",
+                    value=True,
+                    key=f"done_{task['id']}",
                 )
+                schedule_date = cols[1].date_input(
+                    "Schedule date",
+                    value=date.today(),
+                    key=f"date_{task['id']}",
+                )
+                schedule_time = cols[1].time_input(
+                    "Schedule time (UTC)",
+                    value=datetime.now(timezone.utc).time().replace(second=0, microsecond=0),
+                    step=300,
+                    key=f"time_{task['id']}",
+                )
+
                 if cols[2].button("Schedule now", key=f"schedule_{task['id']}"):
                     try:
                         event = schedule_task(
                             st.session_state.credentials, task, mark_complete=mark_done
                         )
+                        remove_task_from_state(task["id"])
                         st.success(
                             f"Scheduled on Google Calendar starting at {event['start']['dateTime']}"
                         )
                     except Exception as exc:  # noqa: BLE001
                         st.error(f"Could not schedule: {exc}")
+
+                if cols[3].button("Schedule at", key=f"schedule_at_{task['id']}"):
+                    try:
+                        start_at = datetime.combine(schedule_date, schedule_time).replace(tzinfo=timezone.utc)
+                        event = schedule_task(
+                            st.session_state.credentials,
+                            task,
+                            mark_complete=mark_done,
+                            start_time=start_at,
+                        )
+                        remove_task_from_state(task["id"])
+                        st.success(
+                            f"Scheduled on Google Calendar at {event['start']['dateTime']} (UTC)"
+                        )
+                    except Exception as exc:  # noqa: BLE001
+                        st.error(f"Could not schedule at chosen time: {exc}")
+
+                if cols[3].button("Snooze 💤", key=f"snooze_{task['id']}"):
+                    try:
+                        snooze_task(st.session_state.credentials, task, days=1)
+                        remove_task_from_state(task["id"])
+                        st.info("Snoozed to tomorrow.")
+                    except Exception as exc:  # noqa: BLE001
+                        st.error(f"Could not snooze task: {exc}")
