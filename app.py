@@ -7,7 +7,7 @@ from urllib.parse import quote
 import streamlit as st
 
 from src.auth import SCOPES, TOKEN_PATH, clear_credentials, load_credentials
-from src.services import fetch_tasks, schedule_task, snooze_task
+from src.services import fetch_tasks, move_task, schedule_task, snooze_task
 from src.utils import energy_badge, filter_tasks_by_time
 
 st.set_page_config(page_title="TurboOrganizer", page_icon="TO", layout="wide")
@@ -157,6 +157,8 @@ if "filter_date" not in st.session_state:
     st.session_state.filter_date = None
 if "filter_tags" not in st.session_state:
     st.session_state.filter_tags = []
+if "filter_date_enabled" not in st.session_state:
+    st.session_state.filter_date_enabled = False
 DEFAULT_TIMEZONE = ZoneInfo("Europe/Madrid")
 
 # Auto-connect if a cached token exists, but avoid triggering a fresh OAuth flow implicitly.
@@ -345,6 +347,10 @@ else:
         label_visibility="collapsed",
     )
 
+    if st.session_state.filter_mode == "Solo hoy":
+        st.session_state.filter_date_enabled = False
+        st.session_state.filter_date = None
+
     if st.session_state.filter_mode == "Buzon":
         filtered_tasks = [task for task in filtered_tasks if is_in_inbox(task)]
     elif st.session_state.filter_mode == "Solo hoy":
@@ -358,18 +364,34 @@ else:
 
     # Create filter row with Date, Tags, and Clear buttons
     st.markdown("---")
-    filter_cols = st.columns([2, 2, 1])
-    
+    filter_cols = st.columns([3, 2, 1])
+
     with filter_cols[0]:
         st.markdown("**Filtrar por fecha:**")
-        filter_date = st.date_input(
-            "Selecciona una fecha",
-            value=st.session_state.filter_date or date.today(),
-            key="filter_date_picker",
-            label_visibility="collapsed"
-        )
-        if filter_date != st.session_state.filter_date:
-            st.session_state.filter_date = filter_date if filter_date != date.today() or st.session_state.filter_date is not None else None
+        if st.session_state.filter_mode == "Solo hoy":
+            st.caption("No aplica en 'Solo hoy'.")
+        else:
+            date_cols = st.columns([5, 1])
+            with date_cols[1]:
+                st.session_state.filter_date_enabled = st.toggle(
+                    "Usar fecha",
+                    value=st.session_state.filter_date_enabled,
+                    key="filter_date_enabled_toggle",
+                    label_visibility="collapsed",
+                    help="Activa/desactiva el filtro de fecha",
+                )
+            with date_cols[0]:
+                filter_date = st.date_input(
+                    "Selecciona una fecha",
+                    value=st.session_state.filter_date or date.today(),
+                    key="filter_date_picker",
+                    label_visibility="collapsed",
+                    disabled=not st.session_state.filter_date_enabled,
+                )
+            if st.session_state.filter_date_enabled:
+                st.session_state.filter_date = filter_date
+            else:
+                st.session_state.filter_date = None
 
     with filter_cols[1]:
         st.markdown("**Filtrar por tags:**")
@@ -389,11 +411,12 @@ else:
         st.markdown("**Acciones:**")
         if st.button("Limpiar filtros", use_container_width=True):
             st.session_state.filter_date = None
+            st.session_state.filter_date_enabled = False
             st.session_state.filter_tags = []
             st.rerun()
 
     # Apply filters
-    if st.session_state.filter_date:
+    if st.session_state.filter_date and st.session_state.filter_date_enabled:
         filtered_tasks = [
             task for task in filtered_tasks 
             if task.get('due') and datetime.fromisoformat(task['due']).date() == st.session_state.filter_date
@@ -417,6 +440,10 @@ else:
     if not filtered_tasks:
         st.success("No tasks fit the current window. Enjoy a break or widen the time range!")
     else:
+        project_options = sorted(
+            { (task["project"], task["tasklist"]) for task in st.session_state.tasks },
+            key=lambda p: p[0].lower(),
+        )
         for task in filtered_tasks:
             with st.container(border=True):
                 cols = st.columns([3, 2])
@@ -437,13 +464,35 @@ else:
                     )
                 else:
                     title_md = f"<strong>{title_prefix}{task['title']}</strong>"
-                cols[0].markdown(
-                    f"{title_md}<br><br>"
-                    f"Project: `{task['project']}`<br><br>"
-                    f"Duration: {format_duration(task.get('duration'))}<br><br>"
-                    f"Tags: {tags_display}",
-                    unsafe_allow_html=True,
-                )
+                with cols[0]:
+                    cols_proj = st.columns([3, 1])
+                    with cols_proj[0]:
+                        cols_proj[0].markdown(
+                            f"{title_md}<br><br>"
+                            f"Duration: {format_duration(task.get('duration'))}<br><br>"
+                            f"Tags: {tags_display}",
+                            unsafe_allow_html=True,
+                        )
+                    with cols_proj[1]:
+                        with st.popover(f"Project: {task['project']}", use_container_width=True, key=f"project_pop_{task['id']}"):
+                            dest = st.selectbox(
+                                "Mover a proyecto",
+                                options=project_options,
+                                format_func=lambda opt: opt[0],
+                                index=project_options.index((task["project"], task["tasklist"])) if (task["project"], task["tasklist"]) in project_options else 0,
+                                key=f"move_select_{task['id']}",
+                            )
+                            if st.button("Mover", key=f"move_btn_{task['id']}"):
+                                try:
+                                    move_task(
+                                        st.session_state.credentials,
+                                        task,
+                                        destination_tasklist=dest[1],
+                                    )
+                                    st.success(f"Tarea movida a '{dest[0]}'")
+                                    load_tasks()
+                                except Exception as exc:  # noqa: BLE001
+                                    st.error(f"No se pudo mover la tarea: {exc}")
 
                 mark_done = cols[1].checkbox(
                     "Mark completed after scheduling",
@@ -526,3 +575,25 @@ else:
                             st.info(f"Snoozed to {days} day(s) ahead.")
                         except Exception as exc:  # noqa: BLE001
                             st.error(f"Could not snooze task: {exc}")
+
+                move_cols = cols[1].columns([2, 1])
+                project_label, project_value = zip(*project_options) if project_options else ([], [])
+                dest = move_cols[0].selectbox(
+                    "Mover a proyecto",
+                    options=project_options,
+                    format_func=lambda opt: opt[0],
+                    index=project_options.index((task["project"], task["tasklist"])) if (task["project"], task["tasklist"]) in project_options else 0,
+                    key=f"move_select_{task['id']}",
+                )
+                if move_cols[1].button("Mover", key=f"move_btn_{task['id']}"):
+                    try:
+                        moved = move_task(
+                            st.session_state.credentials,
+                            task,
+                            destination_tasklist=dest[1],
+                        )
+                        st.success(f"Tarea movida a '{dest[0]}'")
+                        # Refresca lista
+                        load_tasks()
+                    except Exception as exc:  # noqa: BLE001
+                        st.error(f"No se pudo mover la tarea: {exc}")

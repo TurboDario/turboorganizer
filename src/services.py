@@ -33,10 +33,7 @@ def _parse_due_date(value: str | None) -> datetime | None:
 
 
 def fetch_tasks(creds) -> List[MutableMapping]:
-    """Fetch actionable tasks grouped by their Google Task List (projects).
-
-    Filters out tasks whose due date is in the future (tickler file behavior).
-    """
+    """Fetch actionable tasks grouped by their Google Task List (projects)."""
 
     service = build_tasks_service(creds)
     projects = service.tasklists().list(maxResults=200).execute().get("items", [])
@@ -55,9 +52,6 @@ def fetch_tasks(creds) -> List[MutableMapping]:
         )
         for task in items:
             due_date = _parse_due_date(task.get("due"))
-            if due_date and due_date.date() > now:
-                continue
-
             title = task.get("title", "Untitled Task")
             duration = parse_task_duration(title, task.get("notes"), default=None)
             is_overdue = bool(due_date and due_date.date() < now)
@@ -151,3 +145,21 @@ def snooze_task(creds, task: MutableMapping, days: int = 1) -> MutableMapping:
         )
         .execute()
     )
+
+
+def move_task(creds, task: MutableMapping, destination_tasklist: str) -> MutableMapping:
+    """Move a task to another task list by recreating it and deleting the original."""
+
+    service = build_tasks_service(creds)
+    body = {
+        "title": task.get("title"),
+        "notes": task.get("notes"),
+        "due": task.get("due"),
+    }
+    created = (
+        service.tasks()
+        .insert(tasklist=destination_tasklist, body=body)
+        .execute()
+    )
+    service.tasks().delete(tasklist=task["tasklist"], task=task["id"]).execute()
+    return created
