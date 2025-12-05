@@ -27,29 +27,68 @@ st.markdown(
     div[data-testid="stRadio"] > label {
         display: none !important;
     }
+    /* Hide radio input and ensure it doesn't affect layout */
+    div[data-testid="stRadio"] input {
+        display: none !important;
+        width: 0 !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        position: absolute !important;
+    }
+    div[data-testid="stRadio"] svg {
+        display: none !important;
+        width: 0 !important;
+        margin: 0 !important;
+    }
+    div[data-testid="stRadio"] [data-baseweb="radio"] {
+        padding: 0 !important;
+        margin: 0 !important;
+        width: 100%;
+        display: flex;
+        align-items: stretch;
+    }
+    div[data-testid="stRadio"] [data-baseweb="radio"] > div:first-child {
+        display: none !important;
+        width: 0 !important;
+    }
+    div[data-testid="stRadio"] [data-baseweb="radio"] > div:last-child {
+        width: 100%;
+        display: flex;
+    }
     div[data-testid="stRadio"] label {
         display: flex;
         flex: 1 1 0;
-        min-width: 160px;
+        min-width: 200px;
         border: 1px solid #333;
         background: #111;
         color: #fafafa;
-        padding: 12px 28px;
-        border-radius: 10px;
+        padding: 48px 32px !important;
+        border-radius: 14px;
         cursor: pointer;
         transition: all 0.15s ease;
         justify-content: center;
         align-items: center;
         text-align: center;
+        margin: 0 !important;
+        width: 100%;
+        gap: 0;
+        font-size: 1.4rem;
+        font-weight: 600;
+        min-height: 48px;
+    }
+    div[data-testid="stRadio"] label > div,
+    div[data-testid="stRadio"] label p,
+    div[data-testid="stRadio"] label span {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        width: 100%;
+        text-align: center !important;
+        margin: 0 !important;
+        padding: 0 !important;
     }
     div[data-testid="stRadio"] label:hover {
         border-color: #555;
-    }
-    div[data-testid="stRadio"] input {
-        display: none;
-    }
-    div[data-testid="stRadio"] svg {
-        display: none;
     }
     div[data-testid="stRadio"] [data-baseweb="radio"] > div:first-child {
         display: none;
@@ -218,7 +257,7 @@ with st.container(border=True):
             return "1 día"
         return f"{val} min"
 
-    default_time_value = 60
+    default_time_value = -1  # Indefinido by default
     saved_value = st.session_state.get("time_choice", default_time_value)
     if saved_value not in time_values:
         st.session_state.pop("time_choice", None)
