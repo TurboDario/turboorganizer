@@ -1,6 +1,7 @@
 ﻿import re
 from datetime import date, datetime
 from zoneinfo import ZoneInfo
+import unicodedata
 
 import streamlit as st
 
@@ -11,6 +12,40 @@ from src.utils import energy_badge, filter_tasks_by_time
 st.set_page_config(page_title="TurboOrganizer", page_icon="TO", layout="wide")
 
 st.title("TurboOrganizer")
+
+st.markdown(
+    """
+    <style>
+    /* Turn radios into pill buttons for the mode selector */
+    div[data-testid="stRadio"] > div {
+        flex-direction: row;
+        gap: 0.5rem;
+    }
+    div[data-testid="stRadio"] label {
+        border: 1px solid #333;
+        background: #111;
+        color: #fafafa;
+        padding: 10px 16px;
+        border-radius: 10px;
+        cursor: pointer;
+        transition: all 0.15s ease;
+    }
+    div[data-testid="stRadio"] label:hover {
+        border-color: #555;
+    }
+    div[data-testid="stRadio"] input {
+        display: none;
+    }
+    div[data-testid="stRadio"] label:has(input:checked) {
+        background: #ff5f57;
+        border-color: #ff5f57;
+        color: #ffffff;
+        box-shadow: 0 4px 12px rgba(255,95,87,0.35);
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
 
 if "credentials" not in st.session_state:
     st.session_state.credentials = None
@@ -28,6 +63,10 @@ if "filter_date" not in st.session_state:
     st.session_state.filter_date = None
 if "filter_tags" not in st.session_state:
     st.session_state.filter_tags = []
+if "show_date_picker" not in st.session_state:
+    st.session_state.show_date_picker = False
+if "show_tag_picker" not in st.session_state:
+    st.session_state.show_tag_picker = False
 DEFAULT_TIMEZONE = ZoneInfo("Europe/Madrid")
 
 # Auto-connect if a cached token exists, but avoid triggering a fresh OAuth flow implicitly.
@@ -115,13 +154,15 @@ elif not st.session_state.tasks_loaded:
     st.info("Click 'Load my Tasks' to see your Google Tasks inbox.")
 else:
     filtered_tasks = filter_tasks_by_time(st.session_state.tasks, time_available)
-    filters = st.columns([1, 1, 1])
 
     def normalize_project(name: str) -> str:
-        return (name or '').strip().lower()
+        base = unicodedata.normalize("NFD", (name or '').strip().lower())
+        # Drop accents so inbox names match even if written with accents.
+        return "".join(ch for ch in base if unicodedata.category(ch) != "Mn")
 
     def is_in_inbox(task) -> bool:
-        return normalize_project(task.get('project')) == 'buzon'
+        normalized = normalize_project(task.get('project'))
+        return normalized in {'buzon', 'inbox', ''}
 
     def is_due_today(task) -> bool:
         due_str = task.get('due')
@@ -160,42 +201,87 @@ else:
         all_tags |= extract_tags(t)
     tag_options = sorted(all_tags)
 
-    st.session_state.filter_mode = filters[0].radio(
-        'Modo',
-        options=['Solo hoy', 'Buzon', 'Todo'],
-        index=['Solo hoy', 'Buzon', 'Todo'].index(st.session_state.filter_mode),
-        horizontal=True,
-    )
+    mode_options = ['Solo hoy', 'Buzon', 'Todo']
+    top_row = st.columns([2.5, 1, 1, 1])
 
-    with filters[1].popover('Fecha'):
-        date_value = st.date_input(
-            'Elige fecha',
-            value=st.session_state.filter_date or date.today(),
-            key='filter_date_input',
+    with top_row[0]:
+        st.caption("Modo")
+        if st.session_state.filter_mode not in mode_options:
+            st.session_state.filter_mode = mode_options[0]
+        mode_choice = st.radio(
+            "Modo",
+            mode_options,
+            horizontal=True,
+            index=mode_options.index(st.session_state.filter_mode),
+            key="filter_mode_radio",
+            label_visibility="collapsed",
         )
-        st.session_state.filter_date = date_value
-        if st.session_state.filter_date:
-            if st.button('Quitar fecha', key='clear_date_filter'):
-                st.session_state.filter_date = None
+        st.session_state.filter_mode = mode_choice
 
-    with filters[2].popover('Tags'):
-        if not tag_options:
-            st.caption('Sin tags. Usa #tag en titulo o notas.')
-        else:
-            tag_cols = st.columns(min(len(tag_options), 4))
-            for idx, tag in enumerate(tag_options):
-                col = tag_cols[idx % len(tag_cols)]
-                active = tag in st.session_state.filter_tags
-                style = 'background-color:#d32f2f;color:white;' if active else 'background-color:#111;color:white;'
-                if col.button(f"#{tag}", key=f'tag_{tag}'):
-                    if active:
-                        st.session_state.filter_tags.remove(tag)
-                    else:
-                        st.session_state.filter_tags.append(tag)
-                col.markdown(
-                    f"<div style="{style} padding:6px 10px; border-radius:6px; border:1px solid #333; text-align:center; margin-top:4px;">#{tag}</div>",
-                    unsafe_allow_html=True,
-                )
+    with top_row[1]:
+        st.caption("Fecha")
+        date_active = st.session_state.filter_date is not None
+        date_label = (
+            f"Fecha: {st.session_state.filter_date.isoformat()}"
+            if date_active
+            else "Fecha"
+        )
+        if st.button(
+            date_label,
+            type="primary" if date_active else "secondary",
+            use_container_width=True,
+            key="date_filter_button",
+        ):
+            st.session_state.show_date_picker = True
+
+        if st.session_state.show_date_picker or date_active:
+            picked_date = st.date_input(
+                "",
+                value=st.session_state.filter_date or date.today(),
+                key="filter_date_input",
+                label_visibility="collapsed",
+            )
+            st.session_state.filter_date = picked_date
+
+    with top_row[2]:
+        st.caption("Tags")
+        tag_active = bool(st.session_state.filter_tags)
+        tag_label = (
+            f"Tags ({len(st.session_state.filter_tags)})" if tag_active else "Tags"
+        )
+        if st.button(
+            tag_label,
+            type="primary" if tag_active else "secondary",
+            use_container_width=True,
+            key="tags_filter_button",
+            disabled=not tag_options,
+        ):
+            st.session_state.show_tag_picker = True
+
+        if (st.session_state.show_tag_picker or tag_active) and tag_options:
+            selected_tags = st.multiselect(
+                "",
+                options=tag_options,
+                default=st.session_state.filter_tags,
+                key="filter_tags_select",
+                label_visibility="collapsed",
+            )
+            st.session_state.filter_tags = selected_tags
+        elif not tag_options:
+            st.caption("Sin tags. Usa #tag en titulo o notas.")
+
+    with top_row[3]:
+        st.caption(" ")
+        if st.button(
+            "Eliminar filtros",
+            type="secondary",
+            use_container_width=True,
+            key="clear_all_filters",
+        ):
+            st.session_state.filter_date = None
+            st.session_state.filter_tags = []
+            st.session_state.show_date_picker = False
+            st.session_state.show_tag_picker = False
 
     if st.session_state.filter_mode == 'Buzon':
         filtered_tasks = [task for task in filtered_tasks if is_in_inbox(task)]
